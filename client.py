@@ -125,13 +125,17 @@ class Lab3Client:
                 print(f"   Node {node_id}: ✗ ERROR ({e})")
 
         print("\n" + "=" * 70)
-        if group_a_leader and group_b_leader:
+        if group_a_leader is not None and group_b_leader is not None:
             print(f"✓ CLUSTER READY")
             print(f"  Group A Leader: Node {group_a_leader}")
             print(f"  Group B Leader: Node {group_b_leader}")
             return True
         else:
             print("✗ CLUSTER NOT READY - Leaders not elected")
+            if group_a_leader is None:
+                print("  - Group A has no leader")
+            if group_b_leader is None:
+                print("  - Group B has no leader")
             return False
 
     def get_balances(self):
