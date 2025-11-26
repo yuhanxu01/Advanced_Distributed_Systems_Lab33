@@ -592,7 +592,7 @@ gcloud compute firewall-rules create allow-2pc-internal \
 
 After running tests, ensure these logs are visible:
 
-### Required Logs (Professor will check)
+### Required Logs 
 
 - [ ] **Raft Election**: `[Raft Election] *** Elected as LEADER (Term X) ***`
 - [ ] **Voting Process**: `[Raft Election] Received vote from Node X, current votes: Y/5`
