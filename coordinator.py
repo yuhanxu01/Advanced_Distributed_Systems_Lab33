@@ -78,6 +78,9 @@ class Coordinator:
         # Timeout settings
         self.prepare_timeout = 10.0  # seconds to wait for PREPARE responses
         self.commit_timeout = 10.0
+        
+        # Crash demo mode - adds pauses for manual crash testing
+        self.crash_demo_mode = False
 
         print(f"[Coordinator] Initialized on node {node_id}")
 
@@ -109,10 +112,128 @@ class Coordinator:
                 "status": tx_data["status"].value if isinstance(tx_data["status"], TxStatus) else tx_data["status"],
                 "participants": tx_data.get("participants", []),
                 "decision": tx_data.get("decision"),
-                "operations": tx_data.get("operations", {})
+                "operations": tx_data.get("operations", {}),
+                "votes": tx_data.get("votes", {})
             }
         with open(self.tx_log_file, 'w') as f:
             json.dump(data, f, indent=2)
+
+    def enable_crash_demo(self, enabled: bool = True):
+        """Enable or disable crash demo mode"""
+        self.crash_demo_mode = enabled
+        print(f"[Coordinator] Crash demo mode: {'ENABLED' if enabled else 'DISABLED'}")
+        if enabled:
+            print(f"[Coordinator] A 10-second pause will be added before COMMIT phase")
+
+    def recover_incomplete_transactions(self):
+        """
+        Check for and recover any incomplete transactions after crash recovery.
+        This is called after loading the transaction log on startup.
+        """
+        print(f"\n[Coordinator] ========== CRASH RECOVERY ==========")
+        print(f"[Coordinator] Checking for incomplete transactions...")
+        
+        recovered = 0
+        for tx_id, tx_data in list(self.tx_log.items()):
+            status = tx_data.get("status")
+            decision = tx_data.get("decision")
+            
+            # Convert string status to TxStatus if needed
+            if isinstance(status, str):
+                status = TxStatus(status)
+            
+            print(f"[Coordinator] TX {tx_id}: status={status.value if isinstance(status, TxStatus) else status}, decision={decision}")
+            
+            # Case 1: Decision was COMMIT but transaction didn't complete
+            if decision == "COMMIT" and status != TxStatus.COMMITTED:
+                print(f"\n[Coordinator] [Recovery] Found incomplete COMMIT for TX {tx_id}")
+                print(f"[Coordinator] [Recovery] Resuming Phase 2: COMMIT...")
+                
+                # Find current leaders and resend COMMIT
+                operations = tx_data.get("operations", {})
+                leaders = {}
+                
+                if "A" in operations or "A" in tx_data.get("participants", []):
+                    leader_a = self.find_group_leader(self.group_a_nodes)
+                    if leader_a:
+                        leaders["A"] = leader_a
+                        print(f"[Coordinator] [Recovery] Group A leader: Node {leader_a[0]}")
+                
+                if "B" in operations or "B" in tx_data.get("participants", []):
+                    leader_b = self.find_group_leader(self.group_b_nodes)
+                    if leader_b:
+                        leaders["B"] = leader_b
+                        print(f"[Coordinator] [Recovery] Group B leader: Node {leader_b[0]}")
+                
+                # Send COMMIT to all participants
+                for group, (node_id, host, port) in leaders.items():
+                    try:
+                        print(f"[Coordinator] [Recovery] Sending COMMIT to Group {group} (Node {node_id})")
+                        proxy = self.get_connection(host, port)
+                        if proxy:
+                            result = proxy.commit(tx_id)
+                            print(f"[Coordinator] [Recovery] Group {group} COMMIT result: {result}")
+                    except Exception as e:
+                        print(f"[Coordinator] [Recovery] Error sending COMMIT to Group {group}: {e}")
+                
+                # Mark as committed
+                self.tx_log[tx_id]["status"] = TxStatus.COMMITTED
+                self.save_tx_log()
+                print(f"[Coordinator] [Recovery] TX {tx_id} COMMITTED successfully")
+                recovered += 1
+            
+            # Case 2: Decision was ABORT but transaction didn't complete
+            elif decision == "ABORT" and status != TxStatus.ABORTED:
+                print(f"\n[Coordinator] [Recovery] Found incomplete ABORT for TX {tx_id}")
+                print(f"[Coordinator] [Recovery] Resuming Phase 2: ABORT...")
+                
+                # Similar logic for ABORT
+                operations = tx_data.get("operations", {})
+                for group in ["A", "B"]:
+                    if group in operations or group in tx_data.get("participants", []):
+                        group_nodes = self.group_a_nodes if group == "A" else self.group_b_nodes
+                        leader = self.find_group_leader(group_nodes)
+                        if leader:
+                            node_id, host, port = leader
+                            try:
+                                print(f"[Coordinator] [Recovery] Sending ABORT to Group {group} (Node {node_id})")
+                                proxy = self.get_connection(host, port)
+                                if proxy:
+                                    proxy.abort(tx_id)
+                            except Exception as e:
+                                print(f"[Coordinator] [Recovery] Error: {e}")
+                
+                self.tx_log[tx_id]["status"] = TxStatus.ABORTED
+                self.save_tx_log()
+                print(f"[Coordinator] [Recovery] TX {tx_id} ABORTED")
+                recovered += 1
+            
+            # Case 3: PREPARED state with votes collected but no decision made yet
+            elif status == TxStatus.PREPARED and decision is None:
+                votes = tx_data.get("votes", {})
+                all_commit = all(v == "VOTE_COMMIT" for v in votes.values()) if votes else False
+                
+                if all_commit and len(votes) == len(tx_data.get("participants", [])):
+                    print(f"\n[Coordinator] [Recovery] Found PREPARED TX {tx_id} with all VOTE_COMMITs")
+                    print(f"[Coordinator] [Recovery] Making decision: COMMIT")
+                    tx_data["decision"] = "COMMIT"
+                    self.save_tx_log()
+                    # Recursively process this transaction
+                    self.recover_incomplete_transactions()
+                    return
+                else:
+                    print(f"\n[Coordinator] [Recovery] Found PREPARED TX {tx_id} without complete votes")
+                    print(f"[Coordinator] [Recovery] Making decision: ABORT (safety)")
+                    tx_data["decision"] = "ABORT"
+                    self.save_tx_log()
+                    self.recover_incomplete_transactions()
+                    return
+        
+        if recovered > 0:
+            print(f"\n[Coordinator] [Recovery] Recovered {recovered} incomplete transaction(s)")
+        else:
+            print(f"[Coordinator] [Recovery] No incomplete transactions found")
+        print(f"[Coordinator] ========== RECOVERY COMPLETE ==========\n")
 
     def get_connection(self, host: str, port: int) -> Optional[RPCProxy]:
         """Get or create connection to a node"""
@@ -261,6 +382,20 @@ class Coordinator:
         if all_commit:
             print(f"\n[Coordinator] ========== PHASE 2: COMMIT ==========")
             print(f"[Coordinator] All participants voted COMMIT -> Committing")
+            
+            # Check if crash demo mode is enabled
+            if self.crash_demo_mode:
+                print(f"\n" + "!" * 60)
+                print(f"!!! PAUSE FOR 1.c.iii CRASH DEMO (10 seconds) !!!")
+                print(f"!!! Press Ctrl+C NOW to simulate Coordinator crash !!!")
+                print(f"!!! Participants are in PREPARED state, waiting for COMMIT !!!")
+                print(f"!" * 60 + "\n")
+                import time
+                for i in range(10, 0, -1):
+                    print(f"[Coordinator] Countdown: {i} seconds remaining...")
+                    time.sleep(1)
+                print(f"[Coordinator] Crash window closed, continuing with COMMIT...")
+            
             return self._commit_transaction(tx_id, leaders, operations)
         else:
             print(f"\n[Coordinator] ========== PHASE 2: ABORT ==========")

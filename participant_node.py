@@ -138,6 +138,9 @@ class ParticipantNode:
         self.heartbeat_timer_thread = None
         self.running = False
         self.cluster_ready = False
+        
+        # Crash demo mode - adds pauses for manual crash testing
+        self.crash_demo_mode = False
 
         print(f"[{group_id}-Node {self.node_id}] Initialized with balance={initial_balance}")
 
@@ -335,6 +338,19 @@ class ParticipantNode:
         if success:
             print(f"[{self.group_id}-Node {self.node_id}] [Raft Layer] Majority confirmed, PREPARE persisted")
             print(f"[{self.group_id}-Node {self.node_id}] [2PC Layer] Returning VOTE_COMMIT to coordinator")
+            
+            # Crash demo pause for 1.c.ii scenario
+            if self.crash_demo_mode and self.state == NodeState.LEADER:
+                print(f"\n" + "!" * 60)
+                print(f"!!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!")
+                print(f"!!! Press Ctrl+C NOW to simulate Participant Leader crash !!!")
+                print(f"!!! after VOTE_COMMIT but before receiving COMMIT !!!")
+                print(f"!" * 60 + "\n")
+                for i in range(10, 0, -1):
+                    print(f"[{self.group_id}-Node {self.node_id}] Countdown: {i} seconds remaining...")
+                    time.sleep(1)
+                print(f"[{self.group_id}-Node {self.node_id}] Crash window closed, returning VOTE_COMMIT...")
+            
             return {"vote": "VOTE_COMMIT", "tx_id": tx_id}
         else:
             print(f"[{self.group_id}-Node {self.node_id}] [Raft Layer] Replication failed or timeout")
@@ -758,6 +774,14 @@ class ParticipantNode:
                 return {"is_leader": True, "leader_id": self.node_id, "node_id": self.node_id}
             else:
                 return {"is_leader": False, "leader_id": self.leader_id, "node_id": self.node_id}
+
+    def enable_crash_demo(self, enabled: bool = True) -> dict:
+        """Enable or disable crash demo mode"""
+        self.crash_demo_mode = enabled
+        print(f"[{self.group_id}-Node {self.node_id}] Crash demo mode: {'ENABLED' if enabled else 'DISABLED'}")
+        if enabled:
+            print(f"[{self.group_id}-Node {self.node_id}] A 10-second pause will be added after VOTE_COMMIT")
+        return {"success": True, "crash_demo_mode": enabled}
 
     def query_tx_status(self, tx_id: str) -> dict:
         """Query transaction status (for crash recovery)"""

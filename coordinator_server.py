@@ -26,6 +26,7 @@ class RPCHandler:
         self._functions['get_transaction_status'] = self.coordinator.get_transaction_status
         self._functions['get_all_balances'] = self.coordinator.get_all_balances
         self._functions['set_initial_balances'] = self.coordinator.set_initial_balances
+        self._functions['enable_crash_demo'] = self.coordinator.enable_crash_demo
 
     def handle_connection(self, connection):
         """Handle incoming RPC connection"""
@@ -90,7 +91,10 @@ if __name__ == '__main__':
     # Create coordinator
     coordinator = Coordinator(node_id=1, port=COORDINATOR_PORT)
     coordinator.set_participant_groups(GROUP_A_NODES, GROUP_B_NODES)
+    
+    # Load transaction log and recover any incomplete transactions
     coordinator.load_tx_log()
+    coordinator.recover_incomplete_transactions()
 
     # Create RPC handler
     handler = RPCHandler(coordinator)

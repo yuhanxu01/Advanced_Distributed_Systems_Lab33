@@ -277,57 +277,87 @@ In client, select `3` (Scenario 1.b T1 then T2)
 ## Scenario 1.c.ii: Participant Crash After Voting (Recovery)
 
 ### Script:
-> "Scenario 1.c.ii is more complex: participant crashes after voting COMMIT but before receiving the COMMIT decision."
+> "Scenario 1.c.ii tests participant crash AFTER voting COMMIT but BEFORE receiving the final COMMIT decision."
 
 ### Action:
 1. In client, select `6` (Scenario 1.c.ii)
-2. Watch the logs. When you see VOTE_COMMIT, quickly press Ctrl+C on the Leader node
-3. Wait for Coordinator to complete
-4. Restart the crashed node
+2. The client will enable crash demo mode on the Group A leader
+3. Start the transaction when prompted
+4. **Watch the Group A Leader terminal** - when you see:
+   ```
+   !!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!
+   !!! Press Ctrl+C NOW to simulate Participant Leader crash !!!
+   ```
+5. Quickly press **Ctrl+C** on the Group A Leader terminal
+6. Wait for Coordinator to complete (it will succeed because it already has all votes)
+7. Restart the crashed node when prompted
 
 ### Logs to Highlight:
 
-**Before crash:**
-> "Account A Leader sent VOTE_COMMIT..."
-> "Then it crashed!"
+**Group A Leader (before crash):**
+> "The participant received PREPARE, validated, replicated to Raft majority..."
+> "Now returning VOTE_COMMIT to coordinator..."
+> "The pause appears - this is your window to crash it!"
 
-**Coordinator continues:**
-> "Coordinator already received all VOTE_COMMITs, decides to COMMIT..."
-> "Even though Account A Leader crashed, Coordinator completes the transaction."
+**Coordinator (continues after crash):**
+> "Coordinator already received all VOTE_COMMITs..."
+> "It proceeds with COMMIT phase..."
+> "Group A might fail to respond, but Group B commits successfully."
 
 **After restart:**
-> "Restarting the Account A node..."
-> "Upon recovery, it finds a PREPARED but not COMMITted transaction in Raft log..."
-> "Queries Coordinator, learns the decision was COMMIT..."
-> "Applies COMMIT, balance updated."
+> "Restart the crashed node..."
+> "The new leader (or recovered node) will have the PREPARED state in Raft log..."
+> "All nodes will eventually have consistent state through Raft replication."
 
 ### Script:
-> "This demonstrates Raft durability: even if a node crashes, the PREPARED state is already persisted to Raft majority.
-> After recovery, it can continue to complete the transaction, guaranteeing atomicity."
+> "This demonstrates that even if a participant crashes after voting, the transaction can still complete. The Raft log persists the PREPARED state, so the node can recover."
 
 ---
 
-## Scenario 1.c.iii: Leader Crash and Re-election (6935 Only)
+## Scenario 1.c.iii: Coordinator Crash and Recovery (6935 Only)
 
 ### Script:
-> "Finally, let's test leader crash and re-election, demonstrating Raft's high availability."
+> "Scenario 1.c.iii tests coordinator crash AFTER receiving all votes but BEFORE sending COMMIT. This is the most critical failure point in 2PC."
 
 ### Action:
-1. Press Ctrl+C on the Account A Leader node
-2. Watch the other Account A nodes
+1. In client, select `7` (Scenario 1.c.iii)
+2. The client will enable crash demo mode on the Coordinator
+3. Start the transaction when prompted
+4. **Watch the Coordinator terminal** - when you see:
+   ```
+   !!! PAUSE FOR 1.c.iii CRASH DEMO (10 seconds) !!!
+   !!! Press Ctrl+C NOW to simulate Coordinator crash !!!
+   !!! Participants are in PREPARED state, waiting for COMMIT !!!
+   ```
+5. Quickly press **Ctrl+C** on the Coordinator terminal
+6. Note: Participants are now stuck in PREPARED state!
+7. Restart the coordinator: `python3 coordinator_server.py`
 
 ### Logs to Highlight:
 
-**Other Account A nodes:**
-> "Election timeout, starting new election..."
-> "Term increases from 1 to 2..."
-> "Node 3 starts requesting votes..."
-> "Receives majority votes, becomes the new Leader!"
+**Coordinator (before crash):**
+> "Coordinator sends PREPARE to both groups..."
+> "Both groups return VOTE_COMMIT..."
+> "The pause appears - this is your window to crash!"
+
+**Coordinator (after restart):**
+```
+========== CRASH RECOVERY ==========
+[Coordinator] Checking for incomplete transactions...
+[Coordinator] TX abc123: status=prepared, decision=COMMIT
+[Coordinator] [Recovery] Found incomplete COMMIT for TX abc123
+[Coordinator] [Recovery] Resuming Phase 2: COMMIT...
+[Coordinator] [Recovery] Sending COMMIT to Group A (Node X)
+[Coordinator] [Recovery] Sending COMMIT to Group B (Node Y)
+[Coordinator] [Recovery] TX abc123 COMMITTED successfully
+========== RECOVERY COMPLETE ==========
+```
 
 ### Script:
-> "This is the core value of Raft: when a Leader crashes, other nodes automatically elect a new Leader.
-> The system continues running, ensuring high availability.
-> The new Leader can continue handling 2PC requests without service interruption."
+> "When the coordinator restarts, it loads the transaction log from coordinator_tx_log.json."
+> "It finds the incomplete transaction where it had decided COMMIT but didn't complete Phase 2."
+> "It automatically resumes and sends COMMIT to all participants."
+> "This is how 2PC maintains atomicity even through coordinator crashes."
 
 ---
 

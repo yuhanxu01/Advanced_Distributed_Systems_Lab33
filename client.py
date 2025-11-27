@@ -445,43 +445,78 @@ class Lab3Client:
         print(f"Initial balances: A={balances['A']}, B={balances['B']}")
 
         print("\n📋 This scenario demonstrates crash recovery:")
-        print("  1. Transaction starts, all participants vote COMMIT")
-        print("  2. One participant crashes after voting but before receiving COMMIT")
+        print("  1. Transaction starts, participant votes VOTE_COMMIT")
+        print("  2. A 10-second pause gives you time to crash the participant")
         print("  3. Coordinator still commits (has all votes)")
-        print("  4. Crashed participant recovers and queries coordinator")
-        print("  5. Participant learns decision was COMMIT and applies it")
+        print("  4. After restart, crashed participant recovers its state")
 
-        print("\n⚠️  MANUAL ACTION:")
-        print("  Watch the Group A leader logs. When you see 'VOTE_COMMIT' sent,")
-        print("  quickly crash that node with Ctrl+C")
+        print("\n[Step 1] Enabling crash demo mode on Group A leader...")
+        # Find Group A leader
+        group_a_leader = None
+        for node_id, host, port in self.group_a_nodes:
+            try:
+                proxy = self.connect_participant(host, port)
+                if proxy:
+                    status = proxy.get_status()
+                    if status['state'] == 'leader':
+                        group_a_leader = (node_id, host, port)
+                        print(f"  Found Group A leader: Node {node_id}")
+                        # Enable crash demo mode
+                        proxy.enable_crash_demo(True)
+                        break
+            except:
+                pass
+
+        if not group_a_leader:
+            print("  ERROR: No Group A leader found!")
+            return
+
+        print("\n⚠️  INSTRUCTIONS:")
+        print(f"  1. Watch the terminal of Node {group_a_leader[0]} (Group A Leader)")
+        print("  2. When you see '!!! PAUSE FOR 1.c.ii CRASH DEMO !!!', press Ctrl+C on that terminal")
+        print("  3. The transaction will complete on the Coordinator side")
+        print("  4. Then restart the crashed node to see recovery")
+
         print("\nPress Enter to start the transaction...")
         input()
 
-        print("\n[Test] Executing T1: Transfer $100 from A to B")
+        print("\n[Step 2] Executing T1: Transfer $100 from A to B")
         result = self.execute_transfer("A", "B", 100)
         print(f"Result: {result}")
 
-        print("\n⚠️  Now restart the crashed node:")
-        print("  python participant_server.py <node_id>")
+        print("\n⚠️  If you crashed the node, restart it now:")
+        print(f"  python3 participant_server.py {group_a_leader[0]}")
         print("\nPress Enter after restarting the node...")
         input()
 
         time.sleep(5)  # Wait for node to sync
 
-        print("\n[Verification] Checking final state...")
+        print("\n[Step 3] Verification - Checking final state...")
+        # Disable crash demo mode on new leader
+        for node_id, host, port in self.group_a_nodes:
+            try:
+                proxy = self.connect_participant(host, port)
+                if proxy:
+                    status = proxy.get_status()
+                    if status['state'] == 'leader':
+                        proxy.enable_crash_demo(False)
+            except:
+                pass
+
         balances = self.get_balances()
         print(f"Final balances: A={balances.get('A')}, B={balances.get('B')}")
 
-        self.check_cluster_status()
+        self.verify_raft_replication()
 
         print("\n" + "=" * 70)
         print("SCENARIO 1.c.ii COMPLETED")
-        print("Check that all nodes show consistent state after recovery")
+        print("All nodes should show consistent state after recovery")
         print("=" * 70)
 
     def scenario_1c_iii(self):
         """
-        Scenario 1.c.iii: Coordinator crashes after sending PREPARE (6935 only)
+        Scenario 1.c.iii: Coordinator crashes after receiving all VOTE_COMMITs (6935 only)
+        Coordinator crashes before sending COMMIT, then recovers
         """
         print("\n" + "=" * 70)
         print("SCENARIO 1.c.iii: Coordinator Crash (6935 Only)")
@@ -491,42 +526,77 @@ class Lab3Client:
         self.set_balances(200, 300)
         time.sleep(2)
 
+        balances = self.get_balances()
+        print(f"Initial balances: A={balances['A']}, B={balances['B']}")
+
         print("\n📋 This scenario demonstrates coordinator crash recovery:")
         print("  1. Coordinator sends PREPARE to all participants")
-        print("  2. Coordinator crashes before receiving all votes")
-        print("  3. Participants are in PREPARED state (holding locks)")
-        print("  4. Coordinator recovers and checks transaction log")
-        print("  5. Coordinator either resumes or aborts based on log state")
+        print("  2. All participants vote VOTE_COMMIT")
+        print("  3. A 10-second pause gives you time to crash the coordinator")
+        print("  4. Participants are in PREPARED state (holding locks)")
+        print("  5. Coordinator recovers, finds incomplete TX in log, resumes COMMIT")
 
-        print("\n⚠️  MANUAL ACTIONS:")
-        print("  1. On the coordinator (node1), prepare to crash it")
-        print("  2. Start the transaction, then quickly Ctrl+C the coordinator")
-        print("     AFTER you see 'Sending PREPARE' but BEFORE 'Phase 2'")
-        print("\nPress Enter to start...")
+        print("\n[Step 1] Enabling crash demo mode on Coordinator...")
+        coord = self.connect_coordinator()
+        if coord:
+            coord.enable_crash_demo(True)
+            print("  Crash demo mode ENABLED on Coordinator")
+        else:
+            print("  ERROR: Cannot connect to Coordinator!")
+            return
+
+        print("\n⚠️  INSTRUCTIONS:")
+        print("  1. Watch the terminal of Node 1 (Coordinator)")
+        print("  2. When you see '!!! PAUSE FOR 1.c.iii CRASH DEMO !!!', press Ctrl+C on that terminal")
+        print("  3. The participants will be stuck in PREPARED state")
+        print("  4. Then restart the coordinator to see recovery")
+
+        print("\nPress Enter to start the transaction...")
         input()
 
-        print("\n[Test] Starting transaction (will hang if coordinator crashes)")
-        print("⚠️  CRASH THE COORDINATOR NOW when you see PREPARE messages!")
+        print("\n[Step 2] Executing T1: Transfer $100 from A to B")
+        print("⚠️  WATCH THE COORDINATOR TERMINAL - CRASH IT WHEN YOU SEE THE PAUSE!")
 
         try:
             result = self.execute_transfer("A", "B", 100)
             print(f"Result: {result}")
+            print("\n(If you see this, you didn't crash the coordinator in time)")
         except Exception as e:
-            print(f"Expected error (coordinator crashed): {e}")
+            print(f"Expected: Connection lost due to coordinator crash")
+            print(f"Error: {e}")
 
-        print("\n⚠️  Now restart the coordinator:")
-        print("  python coordinator_server.py")
-        print("\nPress Enter after restarting...")
+        print("\n⚠️  If you crashed the coordinator, restart it now:")
+        print("  python3 coordinator_server.py")
+        print("\n  The coordinator will:")
+        print("  1. Load coordinator_tx_log.json")
+        print("  2. Find the incomplete transaction")
+        print("  3. Resume Phase 2: send COMMIT to participants")
+        print("\nPress Enter after restarting the coordinator...")
         input()
 
-        print("\n[Verification] Checking state after coordinator recovery...")
-        balances = self.get_balances()
-        print(f"Balances: A={balances.get('A')}, B={balances.get('B')}")
+        time.sleep(3)  # Wait for recovery
 
-        self.check_cluster_status()
+        print("\n[Step 3] Verification - Checking final state...")
+        balances = self.get_balances()
+        print(f"Final balances: A={balances.get('A')}, B={balances.get('B')}")
+
+        expected_a = 100  # 200 - 100
+        expected_b = 400  # 300 + 100
+
+        if balances.get('A') == expected_a and balances.get('B') == expected_b:
+            print(f"\n✓ SUCCESS: Transaction completed after coordinator recovery!")
+            print(f"  A: 200 -> {expected_a} (debited $100)")
+            print(f"  B: 300 -> {expected_b} (credited $100)")
+        else:
+            print(f"\n⚠️  Balances don't match expected values")
+            print(f"  Expected: A={expected_a}, B={expected_b}")
+            print(f"  Got: A={balances.get('A')}, B={balances.get('B')}")
+
+        self.verify_raft_replication()
 
         print("\n" + "=" * 70)
         print("SCENARIO 1.c.iii COMPLETED")
+        print("The coordinator successfully recovered and completed the transaction!")
         print("=" * 70)
 
     def verify_raft_replication(self):

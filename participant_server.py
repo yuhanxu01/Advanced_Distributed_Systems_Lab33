@@ -36,6 +36,7 @@ class RPCHandler:
         self._functions['get_balance'] = self.participant.get_balance
         self._functions['set_initial_balance'] = self.participant.set_initial_balance
         self._functions['query_tx_status'] = self.participant.query_tx_status
+        self._functions['enable_crash_demo'] = self.participant.enable_crash_demo
 
     def handle_connection(self, connection):
         """Handle incoming RPC connection"""

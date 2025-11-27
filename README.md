@@ -494,60 +494,120 @@ Account A Leader Log:
 
 ### Scenario 1.c.ii: Participant Crash After Voting (Recovery)
 
-**Before crash - Account A Leader Log:**
+**Step 1: Group A Leader receives PREPARE and votes:**
 ```
+============================================================
+[A-Node 2] [2PC Layer] Received PREPARE message
+[A-Node 2] TX: tx_crash_test
+[A-Node 2] Operation: {'type': 'debit', 'amount': 100}
+============================================================
+[A-Node 2] [2PC Layer] Validation passed. Current balance: 200, New balance: 100
+[A-Node 2] [Raft Layer] PREPARE added to Raft Log (index=0)
+[A-Node 2] [Raft Layer] Majority confirmed, PREPARE persisted
 [A-Node 2] [2PC Layer] Returning VOTE_COMMIT to coordinator
-# --- Node 2 crashes here ---
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!
+!!! Press Ctrl+C NOW to simulate Participant Leader crash !!!
+!!! after VOTE_COMMIT but before receiving COMMIT !!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+[A-Node 2] Countdown: 10 seconds remaining...
+[A-Node 2] Countdown: 9 seconds remaining...
+# --- User presses Ctrl+C here ---
 ```
 
-**Coordinator Log (continues):**
+**Step 2: Coordinator continues (it already has all votes):**
 ```
 [Coordinator] Group A voted: VOTE_COMMIT
 [Coordinator] Group B voted: VOTE_COMMIT
 
 [Coordinator] ========== PHASE 2: COMMIT ==========
+[Coordinator] All participants voted COMMIT -> Committing
 [Coordinator] Sending COMMIT to Group A (Node 2)
 [Coordinator] Group A: Connection failed (node crashed)
 [Coordinator] Sending COMMIT to Group B (Node 7)
 [Coordinator] Group B COMMIT acknowledged. Balance: 400
 ```
 
-**Account A Recovery Log:**
+**Step 3: After restarting crashed node, Raft syncs state:**
 ```
 [A-Node 2] Loaded state: term=1, log_len=1
-[A-Node 2] [Recovery] Found uncommitted transaction tx_abc, state=PREPARED
-[A-Node 2] [Recovery] Querying Coordinator for final decision...
-[A-Node 2] [Recovery] Coordinator decision: COMMIT
-[A-Node 2] [State Machine] TX tx_abc COMMITTED: balance 200 -> 100
+[A-Node 2] [Raft Follower] Syncing from new leader...
+[A-Node 2] [Raft Follower] Applying committed log: prepare, tx=tx_crash_test
+[A-Node 2] [Raft Follower] Applying committed log: commit, tx=tx_crash_test
+[A-Node 2] [State Machine] TX tx_crash_test COMMITTED: balance 200 -> 100
 ```
 
 ---
 
-### Scenario 1.c.iii: Leader Crash and Re-election
+### Scenario 1.c.iii: Coordinator Crash and Recovery (6935 Only)
 
-**New Election After Leader Crash:**
+**Step 1: Coordinator receives all votes, then crash window:**
 ```
-[A-Node 3] [Raft Election] Election timeout, starting new election
-[A-Node 3] [Raft Election] Starting election, Term=2
-[A-Node 3] [Raft Election] Voted for self, current votes: 1/5
+[Coordinator] ========== PHASE 1: PREPARE ==========
+[Coordinator] Sending PREPARE to Group A (Node 2)
+[Coordinator] Sending PREPARE to Group B (Node 7)
+[Coordinator] Group A voted: VOTE_COMMIT
+[Coordinator] Group B voted: VOTE_COMMIT
 
-[A-Node 0] [Raft Election] Received vote request from Node 3 (Term 2)
-[A-Node 0] [Raft Election] Voted for Node 3 (Term 2)
+[Coordinator] ========== PHASE 2: COMMIT ==========
+[Coordinator] All participants voted COMMIT -> Committing
 
-[A-Node 4] [Raft Election] Received vote request from Node 3 (Term 2)
-[A-Node 4] [Raft Election] Voted for Node 3 (Term 2)
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!! PAUSE FOR 1.c.iii CRASH DEMO (10 seconds) !!!
+!!! Press Ctrl+C NOW to simulate Coordinator crash !!!
+!!! Participants are in PREPARED state, waiting for COMMIT !!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-[A-Node 3] [Raft Election] Received vote from Node 0, current votes: 2/5 (need 3)
-[A-Node 3] [Raft Election] Received vote from Node 4, current votes: 3/5 (need 3)
-
-============================================================
-[A-Node 3] [Raft Election] Received 3/5 votes
-[A-Node 3] [Raft Election] *** Elected as LEADER (Term 2) ***
-============================================================
-
-[Coordinator] Group A leader changed: Node 2 -> Node 3
-[Coordinator] Forwarding request to new leader...
+[Coordinator] Countdown: 10 seconds remaining...
+[Coordinator] Countdown: 9 seconds remaining...
+# --- User presses Ctrl+C here ---
 ```
+
+**Step 2: Participants are stuck in PREPARED state:**
+```
+[A-Node 2] TX tx_abc state -> PREPARED (expected balance: 100)
+# Node is waiting for COMMIT message that never comes...
+```
+
+**Step 3: Coordinator restarts and recovers:**
+```
+============================================================
+Starting 2PC Coordinator (Node 1)
+============================================================
+[Coordinator] Loaded 1 transactions from log
+
+[Coordinator] ========== CRASH RECOVERY ==========
+[Coordinator] Checking for incomplete transactions...
+[Coordinator] TX tx_abc: status=committing, decision=COMMIT
+
+[Coordinator] [Recovery] Found incomplete COMMIT for TX tx_abc
+[Coordinator] [Recovery] Resuming Phase 2: COMMIT...
+[Coordinator] [Recovery] Group A leader: Node 2
+[Coordinator] [Recovery] Group B leader: Node 7
+[Coordinator] [Recovery] Sending COMMIT to Group A (Node 2)
+[Coordinator] [Recovery] Group A COMMIT result: {'success': True, 'balance': 100}
+[Coordinator] [Recovery] Sending COMMIT to Group B (Node 7)
+[Coordinator] [Recovery] Group B COMMIT result: {'success': True, 'balance': 400}
+[Coordinator] [Recovery] TX tx_abc COMMITTED successfully
+
+[Coordinator] [Recovery] Recovered 1 incomplete transaction(s)
+[Coordinator] ========== RECOVERY COMPLETE ==========
+```
+
+**Step 4: Participants receive delayed COMMIT:**
+```
+============================================================
+[A-Node 2] [2PC Layer] Received COMMIT message
+[A-Node 2] TX: tx_abc
+============================================================
+[A-Node 2] [Raft Layer] COMMIT added to Raft Log (index=1)
+[A-Node 2] [Raft Leader] Applying committed log: commit, tx=tx_abc
+[A-Node 2] [State Machine] TX tx_abc COMMITTED: balance 200 -> 100
+```
+
+**Final Result:** A=100, B=400 (Transaction completed successfully after recovery!)
 
 ---
 
@@ -592,7 +652,7 @@ gcloud compute firewall-rules create allow-2pc-internal \
 
 After running tests, ensure these logs are visible:
 
-### Required Logs 
+### Required Logs (Professor will check)
 
 - [ ] **Raft Election**: `[Raft Election] *** Elected as LEADER (Term X) ***`
 - [ ] **Voting Process**: `[Raft Election] Received vote from Node X, current votes: Y/5`
