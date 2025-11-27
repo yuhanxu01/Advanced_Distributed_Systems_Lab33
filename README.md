@@ -494,50 +494,61 @@ Account A Leader Log:
 
 ### Scenario 1.c.ii: Participant Crash After Voting (Recovery)
 
-**Step 1: Group A Leader receives PREPARE and votes:**
-```
-============================================================
-[A-Node 2] [2PC Layer] Received PREPARE message
-[A-Node 2] TX: tx_crash_test
-[A-Node 2] Operation: {'type': 'debit', 'amount': 100}
-============================================================
-[A-Node 2] [2PC Layer] Validation passed. Current balance: 200, New balance: 100
-[A-Node 2] [Raft Layer] PREPARE added to Raft Log (index=0)
-[A-Node 2] [Raft Layer] Majority confirmed, PREPARE persisted
-[A-Node 2] [2PC Layer] Returning VOTE_COMMIT to coordinator
+**How it works:**
+1. Coordinator sends PREPARE, receives VOTE_COMMIT from all participants
+2. Coordinator pauses for 10 seconds (crash demo window)
+3. During pause, user crashes the **Participant Leader** (not Coordinator!)
+4. Coordinator completes COMMIT (it already has all votes)
+5. Crashed node recovers via Raft replication when restarted
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!
-!!! Press Ctrl+C NOW to simulate Participant Leader crash !!!
-!!! after VOTE_COMMIT but before receiving COMMIT !!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-[A-Node 2] Countdown: 10 seconds remaining...
-[A-Node 2] Countdown: 9 seconds remaining...
-# --- User presses Ctrl+C here ---
+**Step 1: Coordinator receives all votes and pauses:**
 ```
-
-**Step 2: Coordinator continues (it already has all votes):**
-```
+[Coordinator] ========== PHASE 1: PREPARE ==========
+[Coordinator] Sending PREPARE to Group A (Node 2)
+[Coordinator] Sending PREPARE to Group B (Node 7)
 [Coordinator] Group A voted: VOTE_COMMIT
 [Coordinator] Group B voted: VOTE_COMMIT
 
 [Coordinator] ========== PHASE 2: COMMIT ==========
 [Coordinator] All participants voted COMMIT -> Committing
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!
+!!! Go to PARTICIPANT LEADER terminal and press Ctrl+C NOW !!!
+!!! Participants are in PREPARED state !!!
+!!! After crash, Coordinator will still complete COMMIT !!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+[Coordinator] Countdown: 10 seconds remaining...
+# --- User switches to Group A Leader terminal and presses Ctrl+C ---
+```
+
+**Step 2: Coordinator continues (Group A crashed):**
+```
+[Coordinator] Crash window closed, continuing with COMMIT...
 [Coordinator] Sending COMMIT to Group A (Node 2)
 [Coordinator] Group A: Connection failed (node crashed)
 [Coordinator] Sending COMMIT to Group B (Node 7)
 [Coordinator] Group B COMMIT acknowledged. Balance: 400
+
+[Coordinator] Transaction 4ef44609 COMMITTED ✓
 ```
 
-**Step 3: After restarting crashed node, Raft syncs state:**
+**Step 3: After restarting crashed node:**
 ```
+# Restart: python3 participant_server.py 2
+
+[A-Node 2] Initialized with balance=0.0
 [A-Node 2] Loaded state: term=1, log_len=1
-[A-Node 2] [Raft Follower] Syncing from new leader...
-[A-Node 2] [Raft Follower] Applying committed log: prepare, tx=tx_crash_test
-[A-Node 2] [Raft Follower] Applying committed log: commit, tx=tx_crash_test
-[A-Node 2] [State Machine] TX tx_crash_test COMMITTED: balance 200 -> 100
+[A-Node 2] Started
+
+# Node syncs with other Raft nodes and receives COMMIT entry
+[A-Node 2] AppendEntries from leader 3, entries=1
+[A-Node 2] [Raft Follower] Applying committed log: commit, tx=4ef44609
+[A-Node 2] [State Machine] TX 4ef44609 COMMITTED: balance 200 -> 100
 ```
+
+**Final Result:** All nodes consistent - A=100, B=400
 
 ---
 

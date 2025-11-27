@@ -277,86 +277,131 @@ In client, select `3` (Scenario 1.b T1 then T2)
 ## Scenario 1.c.ii: Participant Crash After Voting (Recovery)
 
 ### Script:
-> "Scenario 1.c.ii tests participant crash AFTER voting COMMIT but BEFORE receiving the final COMMIT decision."
+> "Scenario 1.c.ii tests what happens when a Participant Leader crashes AFTER voting COMMIT but BEFORE receiving the final COMMIT decision from the Coordinator."
 
 ### Action:
 1. In client, select `6` (Scenario 1.c.ii)
-2. The client will enable crash demo mode on the Group A leader
+2. The client will enable crash demo mode "1.c.ii" on the Coordinator
 3. Start the transaction when prompted
-4. **Watch the Group A Leader terminal** - when you see:
+4. **Watch the COORDINATOR (Node 1) terminal** - when you see:
    ```
+   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
    !!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!
-   !!! Press Ctrl+C NOW to simulate Participant Leader crash !!!
+   !!! Go to PARTICIPANT LEADER terminal and press Ctrl+C NOW !!!
+   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
    ```
-5. Quickly press **Ctrl+C** on the Group A Leader terminal
-6. Wait for Coordinator to complete (it will succeed because it already has all votes)
-7. Restart the crashed node when prompted
+5. **QUICKLY switch to the Group A Leader terminal** and press **Ctrl+C**
+6. The Coordinator will continue and complete the COMMIT (it already has all votes)
+7. Restart the crashed participant when prompted
+
+### Key Points:
+- The pause happens on **Coordinator**, NOT on Participant
+- During the pause, you crash the **Participant Leader**
+- Coordinator completes because it already received VOTE_COMMIT
+- Crashed node recovers via Raft log replication when restarted
 
 ### Logs to Highlight:
 
-**Group A Leader (before crash):**
-> "The participant received PREPARE, validated, replicated to Raft majority..."
-> "Now returning VOTE_COMMIT to coordinator..."
-> "The pause appears - this is your window to crash it!"
+**Coordinator (Node 1):**
+```
+[Coordinator] Group A voted: VOTE_COMMIT
+[Coordinator] Group B voted: VOTE_COMMIT
 
-**Coordinator (continues after crash):**
-> "Coordinator already received all VOTE_COMMITs..."
-> "It proceeds with COMMIT phase..."
-> "Group A might fail to respond, but Group B commits successfully."
+[Coordinator] ========== PHASE 2: COMMIT ==========
 
-**After restart:**
-> "Restart the crashed node..."
-> "The new leader (or recovered node) will have the PREPARED state in Raft log..."
-> "All nodes will eventually have consistent state through Raft replication."
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!
+!!! Go to PARTICIPANT LEADER terminal and press Ctrl+C NOW !!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-### Script:
-> "This demonstrates that even if a participant crashes after voting, the transaction can still complete. The Raft log persists the PREPARED state, so the node can recover."
+[Coordinator] Countdown: 10 seconds remaining...
+# <<< USER CRASHES PARTICIPANT HERE >>>
+...
+[Coordinator] Sending COMMIT to Group A (Node 2)
+[Coordinator] Group A: Connection failed  # Because you crashed it
+[Coordinator] Sending COMMIT to Group B (Node 7)
+[Coordinator] Group B COMMIT acknowledged. Balance: 400
+[Coordinator] Transaction COMMITTED  # Still commits!
+```
+
+**After restarting crashed node:**
+> "When you restart Node 2, it will sync with the other Raft nodes..."
+> "The COMMIT entry from the leader will be replicated..."
+> "All nodes end up with consistent state."
 
 ---
 
 ## Scenario 1.c.iii: Coordinator Crash and Recovery (6935 Only)
 
 ### Script:
-> "Scenario 1.c.iii tests coordinator crash AFTER receiving all votes but BEFORE sending COMMIT. This is the most critical failure point in 2PC."
+> "Scenario 1.c.iii tests what happens when the Coordinator crashes AFTER receiving all votes but BEFORE sending COMMIT. This is the most dangerous failure scenario in 2PC."
 
 ### Action:
 1. In client, select `7` (Scenario 1.c.iii)
-2. The client will enable crash demo mode on the Coordinator
+2. The client will enable crash demo mode "1.c.iii" on the Coordinator
 3. Start the transaction when prompted
-4. **Watch the Coordinator terminal** - when you see:
+4. **Watch the COORDINATOR (Node 1) terminal** - when you see:
    ```
+   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
    !!! PAUSE FOR 1.c.iii CRASH DEMO (10 seconds) !!!
-   !!! Press Ctrl+C NOW to simulate Coordinator crash !!!
+   !!! Press Ctrl+C on THIS COORDINATOR terminal NOW !!!
    !!! Participants are in PREPARED state, waiting for COMMIT !!!
+   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
    ```
-5. Quickly press **Ctrl+C** on the Coordinator terminal
+5. Press **Ctrl+C** on the **Coordinator (Node 1)** terminal
 6. Note: Participants are now stuck in PREPARED state!
 7. Restart the coordinator: `python3 coordinator_server.py`
+
+### Key Points:
+- The pause happens on **Coordinator**
+- During the pause, you crash the **Coordinator itself**
+- Participants are stuck waiting for COMMIT/ABORT
+- When Coordinator restarts, it recovers from transaction log
 
 ### Logs to Highlight:
 
 **Coordinator (before crash):**
-> "Coordinator sends PREPARE to both groups..."
-> "Both groups return VOTE_COMMIT..."
-> "The pause appears - this is your window to crash!"
+```
+[Coordinator] ========== PHASE 1: PREPARE ==========
+[Coordinator] Sending PREPARE to Group A (Node 2)
+[Coordinator] Sending PREPARE to Group B (Node 7)
+[Coordinator] Group A voted: VOTE_COMMIT
+[Coordinator] Group B voted: VOTE_COMMIT
+
+[Coordinator] ========== PHASE 2: COMMIT ==========
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!! PAUSE FOR 1.c.iii CRASH DEMO (10 seconds) !!!
+!!! Press Ctrl+C on THIS COORDINATOR terminal NOW !!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+[Coordinator] Countdown: 10 seconds remaining...
+# <<< USER PRESSES Ctrl+C HERE >>>
+```
 
 **Coordinator (after restart):**
 ```
-========== CRASH RECOVERY ==========
+============================================================
+Starting 2PC Coordinator (Node 1)
+============================================================
+[Coordinator] Loaded 1 transactions from log
+
+[Coordinator] ========== CRASH RECOVERY ==========
 [Coordinator] Checking for incomplete transactions...
-[Coordinator] TX abc123: status=prepared, decision=COMMIT
-[Coordinator] [Recovery] Found incomplete COMMIT for TX abc123
+[Coordinator] TX tx_abc: status=committing, decision=COMMIT
+
+[Coordinator] [Recovery] Found incomplete COMMIT for TX tx_abc
 [Coordinator] [Recovery] Resuming Phase 2: COMMIT...
-[Coordinator] [Recovery] Sending COMMIT to Group A (Node X)
-[Coordinator] [Recovery] Sending COMMIT to Group B (Node Y)
-[Coordinator] [Recovery] TX abc123 COMMITTED successfully
-========== RECOVERY COMPLETE ==========
+[Coordinator] [Recovery] Sending COMMIT to Group A (Node 2)
+[Coordinator] [Recovery] Sending COMMIT to Group B (Node 7)
+[Coordinator] [Recovery] TX tx_abc COMMITTED successfully
+[Coordinator] ========== RECOVERY COMPLETE ==========
 ```
 
 ### Script:
 > "When the coordinator restarts, it loads the transaction log from coordinator_tx_log.json."
-> "It finds the incomplete transaction where it had decided COMMIT but didn't complete Phase 2."
-> "It automatically resumes and sends COMMIT to all participants."
+> "It finds the incomplete transaction where it had decided COMMIT but didn't send the messages."
+> "It automatically resumes Phase 2 and sends COMMIT to all participants."
 > "This is how 2PC maintains atomicity even through coordinator crashes."
 
 ---

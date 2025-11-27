@@ -338,19 +338,6 @@ class ParticipantNode:
         if success:
             print(f"[{self.group_id}-Node {self.node_id}] [Raft Layer] Majority confirmed, PREPARE persisted")
             print(f"[{self.group_id}-Node {self.node_id}] [2PC Layer] Returning VOTE_COMMIT to coordinator")
-            
-            # Crash demo pause for 1.c.ii scenario
-            if self.crash_demo_mode and self.state == NodeState.LEADER:
-                print(f"\n" + "!" * 60)
-                print(f"!!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!")
-                print(f"!!! Press Ctrl+C NOW to simulate Participant Leader crash !!!")
-                print(f"!!! after VOTE_COMMIT but before receiving COMMIT !!!")
-                print(f"!" * 60 + "\n")
-                for i in range(10, 0, -1):
-                    print(f"[{self.group_id}-Node {self.node_id}] Countdown: {i} seconds remaining...")
-                    time.sleep(1)
-                print(f"[{self.group_id}-Node {self.node_id}] Crash window closed, returning VOTE_COMMIT...")
-            
             return {"vote": "VOTE_COMMIT", "tx_id": tx_id}
         else:
             print(f"[{self.group_id}-Node {self.node_id}] [Raft Layer] Replication failed or timeout")

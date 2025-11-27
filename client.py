@@ -431,7 +431,10 @@ class Lab3Client:
     def scenario_1c_ii(self):
         """
         Scenario 1.c.ii: Participant crashes AFTER voting COMMIT (recovery)
-        Node crashes after sending VOTE_COMMIT but before receiving COMMIT
+        - Coordinator pauses after receiving VOTE_COMMIT
+        - During pause, user crashes the Participant Leader
+        - Coordinator completes COMMIT (it already has all votes)
+        - Crashed participant recovers via Raft replication
         """
         print("\n" + "=" * 70)
         print("SCENARIO 1.c.ii: Participant Crash After Voting")
@@ -444,13 +447,13 @@ class Lab3Client:
         balances = self.get_balances()
         print(f"Initial balances: A={balances['A']}, B={balances['B']}")
 
-        print("\n📋 This scenario demonstrates crash recovery:")
-        print("  1. Transaction starts, participant votes VOTE_COMMIT")
-        print("  2. A 10-second pause gives you time to crash the participant")
-        print("  3. Coordinator still commits (has all votes)")
-        print("  4. After restart, crashed participant recovers its state")
+        print("\n📋 This scenario demonstrates:")
+        print("  1. Coordinator sends PREPARE, participants vote VOTE_COMMIT")
+        print("  2. Coordinator pauses for 10 seconds (your crash window)")
+        print("  3. During pause, YOU crash the Participant Leader (Group A)")
+        print("  4. Coordinator completes COMMIT (already has all votes)")
+        print("  5. Restart crashed node - it recovers via Raft sync")
 
-        print("\n[Step 1] Enabling crash demo mode on Group A leader...")
         # Find Group A leader
         group_a_leader = None
         for node_id, host, port in self.group_a_nodes:
@@ -460,9 +463,7 @@ class Lab3Client:
                     status = proxy.get_status()
                     if status['state'] == 'leader':
                         group_a_leader = (node_id, host, port)
-                        print(f"  Found Group A leader: Node {node_id}")
-                        # Enable crash demo mode
-                        proxy.enable_crash_demo(True)
+                        print(f"\n📌 Group A Leader is: Node {node_id}")
                         break
             except:
                 pass
@@ -471,11 +472,23 @@ class Lab3Client:
             print("  ERROR: No Group A leader found!")
             return
 
-        print("\n⚠️  INSTRUCTIONS:")
-        print(f"  1. Watch the terminal of Node {group_a_leader[0]} (Group A Leader)")
-        print("  2. When you see '!!! PAUSE FOR 1.c.ii CRASH DEMO !!!', press Ctrl+C on that terminal")
-        print("  3. The transaction will complete on the Coordinator side")
-        print("  4. Then restart the crashed node to see recovery")
+        print("\n[Step 1] Enabling crash demo mode '1.c.ii' on Coordinator...")
+        coord = self.connect_coordinator()
+        if coord:
+            coord.enable_crash_demo("1.c.ii")
+        else:
+            print("  ERROR: Cannot connect to Coordinator!")
+            return
+
+        print("\n" + "=" * 70)
+        print("⚠️  INSTRUCTIONS:")
+        print("=" * 70)
+        print(f"  1. Watch the COORDINATOR (Node 1) terminal")
+        print(f"  2. When you see the PAUSE countdown, QUICKLY switch to")
+        print(f"     the GROUP A LEADER (Node {group_a_leader[0]}) terminal")
+        print(f"  3. Press Ctrl+C on Node {group_a_leader[0]} to crash it")
+        print(f"  4. Coordinator will still complete the transaction")
+        print("=" * 70)
 
         print("\nPress Enter to start the transaction...")
         input()
@@ -484,39 +497,45 @@ class Lab3Client:
         result = self.execute_transfer("A", "B", 100)
         print(f"Result: {result}")
 
-        print("\n⚠️  If you crashed the node, restart it now:")
+        # Disable crash demo mode
+        try:
+            coord = self.connect_coordinator()
+            if coord:
+                coord.enable_crash_demo(None)
+        except:
+            pass
+
+        print("\n⚠️  If you crashed the Participant Leader, restart it now:")
         print(f"  python3 participant_server.py {group_a_leader[0]}")
         print("\nPress Enter after restarting the node...")
         input()
 
-        time.sleep(5)  # Wait for node to sync
+        time.sleep(5)  # Wait for Raft sync
 
         print("\n[Step 3] Verification - Checking final state...")
-        # Disable crash demo mode on new leader
-        for node_id, host, port in self.group_a_nodes:
-            try:
-                proxy = self.connect_participant(host, port)
-                if proxy:
-                    status = proxy.get_status()
-                    if status['state'] == 'leader':
-                        proxy.enable_crash_demo(False)
-            except:
-                pass
-
         balances = self.get_balances()
         print(f"Final balances: A={balances.get('A')}, B={balances.get('B')}")
 
+        expected_a = 100
+        expected_b = 400
+
+        if balances.get('A') == expected_a and balances.get('B') == expected_b:
+            print(f"\n✓ SUCCESS: Transaction completed!")
+            print(f"  The crashed node recovered via Raft replication")
+        
         self.verify_raft_replication()
 
         print("\n" + "=" * 70)
         print("SCENARIO 1.c.ii COMPLETED")
-        print("All nodes should show consistent state after recovery")
         print("=" * 70)
 
     def scenario_1c_iii(self):
         """
         Scenario 1.c.iii: Coordinator crashes after receiving all VOTE_COMMITs (6935 only)
-        Coordinator crashes before sending COMMIT, then recovers
+        - Coordinator pauses after receiving VOTE_COMMIT
+        - During pause, user crashes the Coordinator itself
+        - Participants stuck in PREPARED state
+        - Coordinator recovers and resumes COMMIT
         """
         print("\n" + "=" * 70)
         print("SCENARIO 1.c.iii: Coordinator Crash (6935 Only)")
@@ -530,26 +549,31 @@ class Lab3Client:
         print(f"Initial balances: A={balances['A']}, B={balances['B']}")
 
         print("\n📋 This scenario demonstrates coordinator crash recovery:")
-        print("  1. Coordinator sends PREPARE to all participants")
-        print("  2. All participants vote VOTE_COMMIT")
-        print("  3. A 10-second pause gives you time to crash the coordinator")
-        print("  4. Participants are in PREPARED state (holding locks)")
-        print("  5. Coordinator recovers, finds incomplete TX in log, resumes COMMIT")
+        print("  1. Coordinator sends PREPARE, receives all VOTE_COMMITs")
+        print("  2. Coordinator pauses for 10 seconds (your crash window)")
+        print("  3. During pause, YOU crash the Coordinator")
+        print("  4. Participants are stuck in PREPARED state")
+        print("  5. Restart Coordinator - it recovers and completes COMMIT")
 
-        print("\n[Step 1] Enabling crash demo mode on Coordinator...")
+        print("\n[Step 1] Enabling crash demo mode '1.c.iii' on Coordinator...")
         coord = self.connect_coordinator()
         if coord:
-            coord.enable_crash_demo(True)
-            print("  Crash demo mode ENABLED on Coordinator")
+            coord.enable_crash_demo("1.c.iii")
+            print("  Crash demo mode '1.c.iii' ENABLED on Coordinator")
         else:
             print("  ERROR: Cannot connect to Coordinator!")
             return
 
-        print("\n⚠️  INSTRUCTIONS:")
-        print("  1. Watch the terminal of Node 1 (Coordinator)")
-        print("  2. When you see '!!! PAUSE FOR 1.c.iii CRASH DEMO !!!', press Ctrl+C on that terminal")
-        print("  3. The participants will be stuck in PREPARED state")
-        print("  4. Then restart the coordinator to see recovery")
+        print("\n" + "=" * 70)
+        print("⚠️  INSTRUCTIONS:")
+        print("=" * 70)
+        print("  1. Watch the COORDINATOR (Node 1) terminal")
+        print("  2. When you see the PAUSE countdown:")
+        print("     '!!! PAUSE FOR 1.c.iii CRASH DEMO !!!'")
+        print("  3. Press Ctrl+C on the COORDINATOR terminal")
+        print("  4. Participants will be stuck in PREPARED state")
+        print("  5. Then restart the Coordinator to see recovery")
+        print("=" * 70)
 
         print("\nPress Enter to start the transaction...")
         input()
@@ -562,14 +586,14 @@ class Lab3Client:
             print(f"Result: {result}")
             print("\n(If you see this, you didn't crash the coordinator in time)")
         except Exception as e:
-            print(f"Expected: Connection lost due to coordinator crash")
-            print(f"Error: {e}")
+            print(f"\n✓ Expected: Connection lost due to coordinator crash")
+            print(f"  Error: {e}")
 
-        print("\n⚠️  If you crashed the coordinator, restart it now:")
+        print("\n⚠️  Restart the Coordinator now:")
         print("  python3 coordinator_server.py")
         print("\n  The coordinator will:")
         print("  1. Load coordinator_tx_log.json")
-        print("  2. Find the incomplete transaction")
+        print("  2. Find the incomplete transaction (status=committing, decision=COMMIT)")
         print("  3. Resume Phase 2: send COMMIT to participants")
         print("\nPress Enter after restarting the coordinator...")
         input()

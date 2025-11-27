@@ -118,12 +118,23 @@ class Coordinator:
         with open(self.tx_log_file, 'w') as f:
             json.dump(data, f, indent=2)
 
-    def enable_crash_demo(self, enabled: bool = True):
-        """Enable or disable crash demo mode"""
-        self.crash_demo_mode = enabled
-        print(f"[Coordinator] Crash demo mode: {'ENABLED' if enabled else 'DISABLED'}")
-        if enabled:
+    def enable_crash_demo(self, mode: str = None):
+        """
+        Enable or disable crash demo mode
+        mode: "1.c.ii" - pause for participant crash demo
+              "1.c.iii" - pause for coordinator crash demo
+              None/False - disable
+        """
+        self.crash_demo_mode = mode
+        if mode:
+            print(f"[Coordinator] Crash demo mode: {mode} ENABLED")
             print(f"[Coordinator] A 10-second pause will be added before COMMIT phase")
+            if mode == "1.c.ii":
+                print(f"[Coordinator] During pause: CRASH THE PARTICIPANT LEADER")
+            elif mode == "1.c.iii":
+                print(f"[Coordinator] During pause: CRASH THIS COORDINATOR")
+        else:
+            print(f"[Coordinator] Crash demo mode: DISABLED")
 
     def recover_incomplete_transactions(self):
         """
@@ -385,11 +396,19 @@ class Coordinator:
             
             # Check if crash demo mode is enabled
             if self.crash_demo_mode:
-                print(f"\n" + "!" * 60)
-                print(f"!!! PAUSE FOR 1.c.iii CRASH DEMO (10 seconds) !!!")
-                print(f"!!! Press Ctrl+C NOW to simulate Coordinator crash !!!")
-                print(f"!!! Participants are in PREPARED state, waiting for COMMIT !!!")
-                print(f"!" * 60 + "\n")
+                print(f"\n" + "!" * 70)
+                if self.crash_demo_mode == "1.c.ii":
+                    print(f"!!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!")
+                    print(f"!!! Go to PARTICIPANT LEADER terminal and press Ctrl+C NOW !!!")
+                    print(f"!!! Participants are in PREPARED state !!!")
+                    print(f"!!! After crash, Coordinator will still complete COMMIT !!!")
+                elif self.crash_demo_mode == "1.c.iii":
+                    print(f"!!! PAUSE FOR 1.c.iii CRASH DEMO (10 seconds) !!!")
+                    print(f"!!! Press Ctrl+C on THIS COORDINATOR terminal NOW !!!")
+                    print(f"!!! Participants are in PREPARED state, waiting for COMMIT !!!")
+                else:
+                    print(f"!!! CRASH DEMO PAUSE (10 seconds) !!!")
+                print(f"!" * 70 + "\n")
                 import time
                 for i in range(10, 0, -1):
                     print(f"[Coordinator] Countdown: {i} seconds remaining...")
