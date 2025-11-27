@@ -396,22 +396,40 @@ class Coordinator:
             
             # Check if crash demo mode is enabled
             if self.crash_demo_mode:
+                import time
                 print(f"\n" + "!" * 70)
                 if self.crash_demo_mode == "1.c.ii":
-                    print(f"!!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!")
-                    print(f"!!! Go to PARTICIPANT LEADER terminal and press Ctrl+C NOW !!!")
-                    print(f"!!! Participants are in PREPARED state !!!")
-                    print(f"!!! After crash, Coordinator will still complete COMMIT !!!")
+                    # Show which node to crash
+                    leader_a_id = leaders.get("A", (None,))[0]
+                    leader_b_id = leaders.get("B", (None,))[0]
+                    print(f"!!! PAUSE FOR 1.c.ii CRASH DEMO !!!")
+                    print(f"!!!")
+                    print(f"!!! Current Leaders:")
+                    print(f"!!!   Group A Leader: Node {leader_a_id}")
+                    print(f"!!!   Group B Leader: Node {leader_b_id}")
+                    print(f"!!!")
+                    print(f"!!! >>> CRASH Node {leader_a_id} NOW! <<<")
+                    print(f"!!!")
+                    print(f"!!! Go to Node {leader_a_id} terminal and press Ctrl+C")
+                    print(f"!!!")
                 elif self.crash_demo_mode == "1.c.iii":
-                    print(f"!!! PAUSE FOR 1.c.iii CRASH DEMO (10 seconds) !!!")
-                    print(f"!!! Press Ctrl+C on THIS COORDINATOR terminal NOW !!!")
-                    print(f"!!! Participants are in PREPARED state, waiting for COMMIT !!!")
+                    print(f"!!! PAUSE FOR 1.c.iii CRASH DEMO !!!")
+                    print(f"!!!")
+                    print(f"!!! >>> CRASH THIS COORDINATOR (Node 1) NOW! <<<")
+                    print(f"!!!")
+                    print(f"!!! Press Ctrl+C on THIS terminal")
+                    print(f"!!! Participants are in PREPARED state, waiting for COMMIT")
+                    print(f"!!!")
                 else:
-                    print(f"!!! CRASH DEMO PAUSE (10 seconds) !!!")
-                print(f"!" * 70 + "\n")
-                import time
+                    print(f"!!! CRASH DEMO PAUSE !!!")
+                print(f"!" * 70)
+                
                 for i in range(10, 0, -1):
-                    print(f"[Coordinator] Countdown: {i} seconds remaining...")
+                    if self.crash_demo_mode == "1.c.ii":
+                        leader_a_id = leaders.get("A", (None,))[0]
+                        print(f"[Coordinator] {i}s remaining... >>> CRASH Node {leader_a_id} NOW <<<")
+                    else:
+                        print(f"[Coordinator] {i}s remaining... >>> CRASH COORDINATOR NOW <<<")
                     time.sleep(1)
                 print(f"[Coordinator] Crash window closed, continuing with COMMIT...")
             

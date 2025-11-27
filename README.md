@@ -496,16 +496,16 @@ Account A Leader Log:
 
 **How it works:**
 1. Coordinator sends PREPARE, receives VOTE_COMMIT from all participants
-2. Coordinator pauses for 10 seconds (crash demo window)
-3. During pause, user crashes the **Participant Leader** (not Coordinator!)
-4. Coordinator completes COMMIT (it already has all votes)
+2. Coordinator pauses for 10 seconds and **tells you which node to crash**
+3. During pause, user crashes the **Participant Leader** indicated in the log
+4. Coordinator completes COMMIT (it already has all votes) with "Connection lost" error
 5. Crashed node recovers via Raft replication when restarted
 
-**Step 1: Coordinator receives all votes and pauses:**
+**Step 1: Coordinator receives all votes and pauses (shows which node to crash):**
 ```
 [Coordinator] ========== PHASE 1: PREPARE ==========
-[Coordinator] Sending PREPARE to Group A (Node 2)
-[Coordinator] Sending PREPARE to Group B (Node 7)
+[Coordinator] Sending PREPARE to Group A (Node 4)
+[Coordinator] Sending PREPARE to Group B (Node 8)
 [Coordinator] Group A voted: VOTE_COMMIT
 [Coordinator] Group B voted: VOTE_COMMIT
 
@@ -513,39 +513,43 @@ Account A Leader Log:
 [Coordinator] All participants voted COMMIT -> Committing
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!! PAUSE FOR 1.c.ii CRASH DEMO (10 seconds) !!!
-!!! Go to PARTICIPANT LEADER terminal and press Ctrl+C NOW !!!
-!!! Participants are in PREPARED state !!!
-!!! After crash, Coordinator will still complete COMMIT !!!
+!!! PAUSE FOR 1.c.ii CRASH DEMO !!!
+!!!
+!!! Current Leaders:
+!!!   Group A Leader: Node 4
+!!!   Group B Leader: Node 8
+!!!
+!!! >>> CRASH Node 4 NOW! <<<
+!!!
+!!! Go to Node 4 terminal and press Ctrl+C
+!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-[Coordinator] Countdown: 10 seconds remaining...
-# --- User switches to Group A Leader terminal and presses Ctrl+C ---
+[Coordinator] 10s remaining... >>> CRASH Node 4 NOW <<<
+[Coordinator] 9s remaining... >>> CRASH Node 4 NOW <<<
+# --- User switches to Node 4 terminal and presses Ctrl+C ---
 ```
 
 **Step 2: Coordinator continues (Group A crashed):**
 ```
 [Coordinator] Crash window closed, continuing with COMMIT...
-[Coordinator] Sending COMMIT to Group A (Node 2)
-[Coordinator] Group A: Connection failed (node crashed)
-[Coordinator] Sending COMMIT to Group B (Node 7)
+[Coordinator] Sending COMMIT to Group A (Node 4)
+[Coordinator] Group A COMMIT error: Connection lost
+[Coordinator] Sending COMMIT to Group B (Node 8)
 [Coordinator] Group B COMMIT acknowledged. Balance: 400
 
-[Coordinator] Transaction 4ef44609 COMMITTED ✓
+[Coordinator] Transaction 63a0c73f COMMITTED ✓
 ```
 
 **Step 3: After restarting crashed node:**
 ```
-# Restart: python3 participant_server.py 2
+# Restart: python3 participant_server.py 4
 
-[A-Node 2] Initialized with balance=0.0
-[A-Node 2] Loaded state: term=1, log_len=1
-[A-Node 2] Started
+[A-Node 4] Initialized with balance=0.0
+[A-Node 4] Loaded state: term=1, log_len=2
+[A-Node 4] Started
 
-# Node syncs with other Raft nodes and receives COMMIT entry
-[A-Node 2] AppendEntries from leader 3, entries=1
-[A-Node 2] [Raft Follower] Applying committed log: commit, tx=4ef44609
-[A-Node 2] [State Machine] TX 4ef44609 COMMITTED: balance 200 -> 100
+# Node syncs with other Raft nodes through AppendEntries
+# Eventually all nodes have consistent state
 ```
 
 **Final Result:** All nodes consistent - A=100, B=400
@@ -554,68 +558,87 @@ Account A Leader Log:
 
 ### Scenario 1.c.iii: Coordinator Crash and Recovery (6935 Only)
 
-**Step 1: Coordinator receives all votes, then crash window:**
+**How it works:**
+1. Coordinator sends PREPARE, receives VOTE_COMMIT from all participants
+2. Coordinator pauses for 10 seconds and **tells you to crash it**
+3. During pause, user crashes the **Coordinator** itself
+4. Participants are stuck in PREPARED state
+5. When Coordinator restarts, it recovers from transaction log and completes COMMIT
+
+**Step 1: Coordinator receives all votes and pauses:**
 ```
 [Coordinator] ========== PHASE 1: PREPARE ==========
-[Coordinator] Sending PREPARE to Group A (Node 2)
-[Coordinator] Sending PREPARE to Group B (Node 7)
+[Coordinator] Sending PREPARE to Group A (Node 5)
+[Coordinator] Sending PREPARE to Group B (Node 8)
 [Coordinator] Group A voted: VOTE_COMMIT
 [Coordinator] Group B voted: VOTE_COMMIT
 
 [Coordinator] ========== PHASE 2: COMMIT ==========
 [Coordinator] All participants voted COMMIT -> Committing
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!! PAUSE FOR 1.c.iii CRASH DEMO (10 seconds) !!!
-!!! Press Ctrl+C NOW to simulate Coordinator crash !!!
-!!! Participants are in PREPARED state, waiting for COMMIT !!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-[Coordinator] Countdown: 10 seconds remaining...
-[Coordinator] Countdown: 9 seconds remaining...
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!! PAUSE FOR 1.c.iii CRASH DEMO !!!
+!!!
+!!! >>> CRASH THIS COORDINATOR (Node 1) NOW! <<<
+!!!
+!!! Press Ctrl+C on THIS terminal
+!!! Participants are in PREPARED state, waiting for COMMIT
+!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+[Coordinator] 10s remaining... >>> CRASH COORDINATOR NOW <<<
+[Coordinator] 9s remaining... >>> CRASH COORDINATOR NOW <<<
 # --- User presses Ctrl+C here ---
+^C
 ```
 
 **Step 2: Participants are stuck in PREPARED state:**
 ```
-[A-Node 2] TX tx_abc state -> PREPARED (expected balance: 100)
-# Node is waiting for COMMIT message that never comes...
+# On Participant terminals, you'll see the last log is:
+[A-Node 5] [2PC Layer] Returning VOTE_COMMIT to coordinator
+# No COMMIT message received - stuck waiting!
 ```
 
 **Step 3: Coordinator restarts and recovers:**
 ```
+# Restart: python3 coordinator_server.py
+
 ============================================================
 Starting 2PC Coordinator (Node 1)
+Listening on: 0.0.0.0:5000
 ============================================================
+[Coordinator] Initialized on node 1
 [Coordinator] Loaded 1 transactions from log
 
 [Coordinator] ========== CRASH RECOVERY ==========
 [Coordinator] Checking for incomplete transactions...
-[Coordinator] TX tx_abc: status=committing, decision=COMMIT
+[Coordinator] TX a60d2ba8: status=committing, decision=COMMIT
 
-[Coordinator] [Recovery] Found incomplete COMMIT for TX tx_abc
+[Coordinator] [Recovery] Found incomplete COMMIT for TX a60d2ba8
 [Coordinator] [Recovery] Resuming Phase 2: COMMIT...
-[Coordinator] [Recovery] Group A leader: Node 2
-[Coordinator] [Recovery] Group B leader: Node 7
-[Coordinator] [Recovery] Sending COMMIT to Group A (Node 2)
+[Coordinator] [Recovery] Group A leader: Node 5
+[Coordinator] [Recovery] Group B leader: Node 8
+[Coordinator] [Recovery] Sending COMMIT to Group A (Node 5)
 [Coordinator] [Recovery] Group A COMMIT result: {'success': True, 'balance': 100}
-[Coordinator] [Recovery] Sending COMMIT to Group B (Node 7)
+[Coordinator] [Recovery] Sending COMMIT to Group B (Node 8)
 [Coordinator] [Recovery] Group B COMMIT result: {'success': True, 'balance': 400}
-[Coordinator] [Recovery] TX tx_abc COMMITTED successfully
+[Coordinator] [Recovery] TX a60d2ba8 COMMITTED successfully
 
 [Coordinator] [Recovery] Recovered 1 incomplete transaction(s)
 [Coordinator] ========== RECOVERY COMPLETE ==========
+
+[Coordinator] Server started. Waiting for connections...
 ```
 
 **Step 4: Participants receive delayed COMMIT:**
 ```
+# On Participant Leader terminal (after Coordinator recovery):
 ============================================================
-[A-Node 2] [2PC Layer] Received COMMIT message
-[A-Node 2] TX: tx_abc
+[A-Node 5] [2PC Layer] Received COMMIT message
+[A-Node 5] TX: a60d2ba8
 ============================================================
-[A-Node 2] [Raft Layer] COMMIT added to Raft Log (index=1)
-[A-Node 2] [Raft Leader] Applying committed log: commit, tx=tx_abc
-[A-Node 2] [State Machine] TX tx_abc COMMITTED: balance 200 -> 100
+[A-Node 5] [Raft Layer] COMMIT added to Raft Log (index=1)
+[A-Node 5] [Raft Leader] Applying committed log: commit, tx=a60d2ba8
+[A-Node 5] [State Machine] TX a60d2ba8 COMMITTED: balance 200 -> 100
 ```
 
 **Final Result:** A=100, B=400 (Transaction completed successfully after recovery!)
